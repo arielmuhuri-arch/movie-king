@@ -1,16 +1,45 @@
-# React + Vite
+# Movie King
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Browse trending, popular, top rated and upcoming movies from TMDB, search by title, play trailers inside the details modal, and see where each movie streams.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. Install dependencies:
 
-## React Compiler
+   ```bash
+   npm install
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+2. Create a `.env.local` file with your TMDB read access token (API Settings -> API Access -> **API Read Access Token**):
 
-## Expanding the ESLint configuration
+   ```bash
+   VITE_TMDB_ACCESS_TOKEN=eyJhbGciOi...
+   ```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+   Note: this is the read access token, not the v3 API key.
+
+3. Start the dev server:
+
+   ```bash
+   npm run dev
+   ```
+
+## Commands
+
+- `npm run dev` - start the Vite dev server
+- `npm run build` - build for production
+- `npm run preview` - preview the production build
+- `npm run lint` - run ESLint
+
+## Notes
+
+- Requests use `Authorization: Bearer <token>` on the TMDB v3 API.
+- Trailers come from `/movie/{id}/videos` and are embedded from YouTube only after the user presses play, so no third-party player loads until then.
+- Streaming options come from `/movie/{id}/watch/providers` and link out to the official provider (Netflix, Prime Video, Disney+, Apple TV, free/ad-supported platforms). This app does not host or proxy any video files.
+- The provider data is JustWatch-powered via TMDB and **requires JustWatch attribution**, which the UI displays. Keep that line if you keep the section, or TMDB can revoke API access.
+- Provider data is region-scoped; change `WATCH_REGION` in `src/App.jsx` to match your country.
+
+## Licensing
+
+- TMDB is free for non-commercial use with attribution. Monetizing the app, adding ads, or charging users requires a commercial license.
+- Every image on this site comes from TMDB and must satisfy [TMDB's image guidelines](https://developer.themoviedb.org/docs/image-basics). For proper attribution, add a "This product uses the TMDB API but is not endorsed or certified by TMDB" notice in your footer and a TMDB logo.

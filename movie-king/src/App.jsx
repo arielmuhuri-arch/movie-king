@@ -3,7 +3,8 @@ import './App.css'
 
 const API_BASE = 'https://api.themoviedb.org/3'
 const IMAGE_BASE = 'https://image.tmdb.org/t/p'
-const API_KEY = import.meta.env.VITE_TMDB_API_KEY
+const YOUTUBE_EMBED_BASE = 'https://www.youtube.com/embed'
+const API_TOKEN = import.meta.env.VITE_TMDB_ACCESS_TOKEN
 
 const TABS = [
   { id: 'trending', label: 'Trending' },
@@ -27,8 +28,49 @@ function getBackdropPath(path) {
   return path ? `${IMAGE_BASE}/w1280${path}` : ''
 }
 
+function getProviderLogo(path, size = 'w92') {
+  return path ? `${IMAGE_BASE}/${size}${path}` : ''
+}
+
 function getYear(date) {
   return date ? date.slice(0, 4) : 'TBA'
+}
+
+const PROVIDER_TYPES = [
+  { id: 'free', label: 'Free' },
+  { id: 'ads', label: 'With ads' },
+  { id: 'flatrate', label: 'Subscription' },
+  { id: 'rent', label: 'Rent' },
+  { id: 'buy', label: 'Buy' },
+]
+
+const WATCH_REGION = 'US'
+
+function collectProviders(providers) {
+  if (!providers || typeof providers !== 'object') return []
+
+  return PROVIDER_TYPES.flatMap(({ id, label }) => {
+    const entries = Array.isArray(providers[id]) ? providers[id] : []
+
+    return entries
+      .filter((provider) => provider && provider.provider_name)
+      .map((provider) => ({ ...provider, typeLabel: label }))
+      .sort((a, b) => (a.display_priority || 99) - (b.display_priority || 99))
+  })
+}
+
+function pickTrailer(videos) {
+  const youtube = (Array.isArray(videos) ? videos : []).filter(
+    (video) => video.site === 'YouTube' && video.key,
+  )
+
+  return (
+    youtube.find((video) => video.type === 'Trailer' && video.official) ||
+    youtube.find((video) => video.type === 'Trailer') ||
+    youtube.find((video) => video.type === 'Teaser') ||
+    youtube[0] ||
+    null
+  )
 }
 
 function formatRuntime(minutes) {
@@ -88,17 +130,24 @@ function App() {
   const [details, setDetails] = useState(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsError, setDetailsError] = useState('')
+  const [trailer, setTrailer] = useState(null)
+  const [trailerLoading, setTrailerLoading] = useState(false)
+  const [trailerError, setTrailerError] = useState('')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [providers, setProviders] = useState([])
+  const [providersLoading, setProvidersLoading] = useState(false)
   const moviesControllerRef = useRef(null)
   const detailsControllerRef = useRef(null)
+  const trailerControllerRef = useRef(null)
+  const providersControllerRef = useRef(null)
   const closeDetailsRef = useRef(null)
 
   const requestMovies = useCallback(async (tab, search = '') => {
-    if (!API_KEY) {
-      throw new Error('Add your TMDB API key to VITE_TMDB_API_KEY.')
+    if (!API_TOKEN) {
+      throw new Error('Add your TMDB access token to VITE_TMDB_ACCESS_TOKEN.')
     }
 
     const params = new URLSearchParams({
-      api_key: API_KEY,
       language: 'en-US',
     })
     const endpoint = search ? '/search/movie' : TAB_ENDPOINTS[tab]
@@ -106,13 +155,17 @@ function App() {
       params.set('query', search)
       params.set('include_adult', 'false')
     }
-    const response = await fetch(`${API_BASE}${endpoint}?${params}`)
+    const response = await fetch(`${API_BASE}${endpoint}?${params}`, {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+    })
     const data = await response.json()
 
     if (!response.ok) {
       throw new Error(
         response.status === 401
-          ? 'The movie API key is not valid.'
+          ? 'The TMDB access token is not valid.'
           : 'Movies could not be loaded right now.',
       )
     }
@@ -202,27 +255,128 @@ function App() {
     }
   }, [selectedMovie])
 
+  const requestTrailer = useCallback(async (movieId, signal) => {
+    if (!API_TOKEN) {
+      throw new Error('Add your TMDB access token to VITE_TMDB_ACCESS_TOKEN.')
+    }
+
+    const params = new URLSearchParams({ language: 'en-US' })
+    const response = await fetch(`${API_BASE}/movie/${movieId}/videos?${params}`, {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+      signal,
+    })
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error('The trailer could not be loaded right now.')
+    }
+
+    return pickTrailer(data.results)
+  }, [])
+
+  const requestProviders = useCallback(async (movieId, signal) => {
+    if (!API_TOKEN) {
+      throw new Error('Add your TMDB access token to VITE_TMDB_ACCESS_TOKEN.')
+    }
+
+    const params = new URLSearchParams({ language: 'en-US' })
+    const response = await fetch(`${API_BASE}/movie/${movieId}/watch/providers?${params}`, {
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+      signal,
+    })
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error('Streaming options could not be loaded right now.')
+    }
+
+    return collectProviders(data.results?.[WATCH_REGION])
+  }, [])
+
   const openDetails = useCallback(
     async (movie) => {
       const requestId = detailsControllerRef.current
         ? detailsControllerRef.current.requestId + 1
         : 1
+      const trailerRequestId = trailerControllerRef.current
+        ? trailerControllerRef.current.requestId + 1
+        : 1
+      const providersRequestId = providersControllerRef.current
+        ? providersControllerRef.current.requestId + 1
+        : 1
       detailsControllerRef.current?.controller.abort()
+      trailerControllerRef.current?.controller.abort()
+      providersControllerRef.current?.controller.abort()
 
       const controller = new AbortController()
+      const trailerController = new AbortController()
+      const providersController = new AbortController()
       detailsControllerRef.current = { controller, requestId }
+      trailerControllerRef.current = { controller: trailerController, requestId: trailerRequestId }
+      providersControllerRef.current = {
+        controller: providersController,
+        requestId: providersRequestId,
+      }
       setSelectedMovie(movie)
       setDetails(null)
       setDetailsError('')
       setDetailsLoading(true)
+      setTrailer(null)
+      setTrailerError('')
+      setIsPlaying(false)
+      setTrailerLoading(true)
+      setProviders([])
+      setProvidersLoading(true)
+
+      requestProviders(movie.id, providersController.signal)
+        .then((results) => {
+          if (providersRequestId !== providersControllerRef.current?.requestId) return
+          setProviders(results)
+        })
+        .catch(() => {
+          if (providersRequestId !== providersControllerRef.current?.requestId) return
+          setProviders([])
+        })
+        .finally(() => {
+          if (providersRequestId === providersControllerRef.current?.requestId) {
+            setProvidersLoading(false)
+          }
+        })
+
+      requestTrailer(movie.id, trailerController.signal)
+        .then((video) => {
+          if (trailerRequestId !== trailerControllerRef.current?.requestId) return
+          setTrailer(video)
+        })
+        .catch((requestError) => {
+          if (
+            requestError.name === 'AbortError' ||
+            trailerRequestId !== trailerControllerRef.current?.requestId
+          ) {
+            return
+          }
+          setTrailerError(requestError.message || 'The trailer could not be loaded right now.')
+        })
+        .finally(() => {
+          if (trailerRequestId === trailerControllerRef.current?.requestId) {
+            setTrailerLoading(false)
+          }
+        })
 
       try {
-        if (!API_KEY) {
-          throw new Error('Add your TMDB API key to VITE_TMDB_API_KEY.')
+        if (!API_TOKEN) {
+          throw new Error('Add your TMDB access token to VITE_TMDB_ACCESS_TOKEN.')
         }
 
-        const params = new URLSearchParams({ api_key: API_KEY, language: 'en-US' })
+        const params = new URLSearchParams({ language: 'en-US' })
         const response = await fetch(`${API_BASE}/movie/${movie.id}?${params}`, {
+          headers: {
+            Authorization: `Bearer ${API_TOKEN}`,
+          },
           signal: controller.signal,
         })
         const data = await response.json()
@@ -248,15 +402,23 @@ function App() {
         }
       }
     },
-    [],
+    [requestTrailer, requestProviders],
   )
 
   const closeDetails = useCallback(() => {
     detailsControllerRef.current?.controller.abort()
+    trailerControllerRef.current?.controller.abort()
+    providersControllerRef.current?.controller.abort()
     setSelectedMovie(null)
     setDetails(null)
     setDetailsError('')
     setDetailsLoading(false)
+    setTrailer(null)
+    setTrailerError('')
+    setTrailerLoading(false)
+    setIsPlaying(false)
+    setProviders([])
+    setProvidersLoading(false)
   }, [])
 
   const handleSearch = (event) => {
@@ -284,6 +446,10 @@ function App() {
 
   const activeTabLabel = TABS.find((tab) => tab.id === activeTab)?.label || 'Movies'
   const sectionTitle = searchQuery ? `Results for “${searchQuery}”` : activeTabLabel
+  const watchLink = providers.find((provider) => provider.free || provider.ads)?.link || ''
+  const trailerEmbedUrl = trailer
+    ? `${YOUTUBE_EMBED_BASE}/${trailer.key}?autoplay=1&rel=0&modestbranding=1`
+    : ''
   const backdrop = featuredMovie ? getBackdropPath(featuredMovie.backdrop_path) : ''
   const featuredTitle = featuredMovie?.title || featuredMovie?.name || ''
 
@@ -476,6 +642,116 @@ function App() {
                       </div>
                     ) : null}
                     <p className="movie-modal__overview">{details.overview || 'No overview is available.'}</p>
+                    {trailerLoading ? (
+                      <div className="trailer" role="status">
+                        <span className="trailer__frame trailer__frame--loading">
+                          <span className="spinner" aria-hidden="true" />
+                        </span>
+                        <p className="trailer__status">Looking for a trailer...</p>
+                      </div>
+                    ) : trailerError ? (
+                      <div className="trailer" role="alert">
+                        <span className="trailer__frame trailer__frame--empty" aria-hidden="true">
+                          <span className="trailer__play-icon">▶</span>
+                        </span>
+                        <p className="trailer__status trailer__status--error">{trailerError}</p>
+                      </div>
+                    ) : trailer ? (
+                      <div className="trailer">
+                        {isPlaying ? (
+                          <span className="trailer__frame">
+                            <iframe
+                              className="trailer__iframe"
+                              src={trailerEmbedUrl}
+                              title={`${details.title} trailer`}
+                              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                              allowFullScreen
+                            />
+                          </span>
+                        ) : (
+                          <button
+                            className="trailer__frame trailer__frame--poster"
+                            type="button"
+                            onClick={() => setIsPlaying(true)}
+                            style={
+                              details.backdrop_path
+                                ? {
+                                    backgroundImage: `linear-gradient(0deg, rgba(8, 10, 15, 0.82) 0%, rgba(8, 10, 15, 0.2) 100%), url("${getBackdropPath(details.backdrop_path)}")`,
+                                  }
+                                : undefined
+                            }
+                            aria-label={`Play the trailer for ${details.title}`}
+                          >
+                            <span className="trailer__play-icon" aria-hidden="true">
+                              ▶
+                            </span>
+                            <span className="trailer__label">
+                              {trailer.type === 'Teaser' ? 'Play teaser' : 'Play trailer'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                    <div className="watch">
+                      {providersLoading ? (
+                        <p className="watch__status" role="status">
+                          Checking streaming availability...
+                        </p>
+                      ) : providers.length ? (
+                        <>
+                          <p className="watch__heading">Where to watch</p>
+                          <div className="watch__list">
+                            {providers.map((provider) => (
+                              <a
+                                key={`${provider.provider_id}-${provider.typeLabel}`}
+                                className="watch__provider"
+                                href={provider.link || '#watch-providers'}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                              >
+                                <span className="watch__logo">
+                                  {provider.logo_path ? (
+                                    <img
+                                      src={getProviderLogo(provider.logo_path)}
+                                      alt=""
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <span aria-hidden="true">{provider.provider_name.slice(0, 2)}</span>
+                                  )}
+                                </span>
+                                <span className="watch__meta">
+                                  <strong>{provider.provider_name}</strong>
+                                  <span>{provider.typeLabel}</span>
+                                </span>
+                                <span className="watch__arrow" aria-hidden="true">
+                                  ↗
+                                </span>
+                              </a>
+                            ))}
+                          </div>
+                          <p className="watch__note">
+                            Availability shown for the United States, powered by JustWatch.
+                            Subscriptions and rentals are billed by the provider.
+                          </p>
+                        </>
+                      ) : !providersLoading ? (
+                        <p className="watch__status">
+                          No streaming options are listed for this movie right now.
+                        </p>
+                      ) : null}
+                      {watchLink ? (
+                        <a
+                          className="button button--primary watch__cta"
+                          href={watchLink}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          Watch full movie
+                          <span aria-hidden="true">↗</span>
+                        </a>
+                      ) : null}
+                    </div>
                     <div className="movie-modal__stats">
                       <div>
                         <span>Popularity</span>
