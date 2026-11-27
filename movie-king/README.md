@@ -1,6 +1,6 @@
 # Movie King
 
-Browse trending, popular, top rated and upcoming movies from TMDB, search by title, play trailers inside the details modal, and see where each movie streams.
+Browse trending, popular, top rated and upcoming movies from TMDB, search by title, play trailers inside the details modal, and see where each movie streams. You can also play a video file from your device in the details modal.
 
 ## Setup
 
@@ -35,6 +35,7 @@ Browse trending, popular, top rated and upcoming movies from TMDB, search by tit
 
 - Requests use `Authorization: Bearer <token>` on the TMDB v3 API.
 - Trailers come from `/movie/{id}/videos` and are embedded from YouTube only after the user presses play, so no third-party player loads until then.
+- To play a movie file you own, open its details and choose **Choose a video file**. Playback happens locally in your browser; the file is not uploaded.
 - Streaming options come from `/movie/{id}/watch/providers` and link out to the official provider (Netflix, Prime Video, Disney+, Apple TV, free/ad-supported platforms). This app does not host or proxy any video files.
 - The provider data is JustWatch-powered via TMDB and **requires JustWatch attribution**, which the UI displays. Keep that line if you keep the section, or TMDB can revoke API access.
 - Provider data is region-scoped; change `WATCH_REGION` in `src/App.jsx` to match your country.

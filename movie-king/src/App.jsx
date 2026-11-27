@@ -134,6 +134,8 @@ function App() {
   const [trailerLoading, setTrailerLoading] = useState(false)
   const [trailerError, setTrailerError] = useState('')
   const [isPlaying, setIsPlaying] = useState(false)
+  const [localVideo, setLocalVideo] = useState(null)
+  const [localVideoError, setLocalVideoError] = useState('')
   const [providers, setProviders] = useState([])
   const [providersLoading, setProvidersLoading] = useState(false)
   const moviesControllerRef = useRef(null)
@@ -141,6 +143,11 @@ function App() {
   const trailerControllerRef = useRef(null)
   const providersControllerRef = useRef(null)
   const closeDetailsRef = useRef(null)
+
+  useEffect(() => {
+    if (!localVideo) return undefined
+    return () => URL.revokeObjectURL(localVideo.url)
+  }, [localVideo])
 
   const requestMovies = useCallback(async (tab, search = '') => {
     if (!API_TOKEN) {
@@ -329,6 +336,8 @@ function App() {
       setTrailerError('')
       setIsPlaying(false)
       setTrailerLoading(true)
+      setLocalVideo(null)
+      setLocalVideoError('')
       setProviders([])
       setProvidersLoading(true)
 
@@ -417,9 +426,20 @@ function App() {
     setTrailerError('')
     setTrailerLoading(false)
     setIsPlaying(false)
+    setLocalVideo(null)
+    setLocalVideoError('')
     setProviders([])
     setProvidersLoading(false)
   }, [])
+
+  const handleLocalVideoChange = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setLocalVideoError('')
+    setLocalVideo({ file, url: URL.createObjectURL(file) })
+  }
 
   const handleSearch = (event) => {
     event.preventDefault()
@@ -692,6 +712,44 @@ function App() {
                         )}
                       </div>
                     ) : null}
+                    <section className="local-player" aria-labelledby="local-player-heading">
+                      <p className="watch__heading" id="local-player-heading">
+                        Play a movie file
+                      </p>
+                      <p className="local-player__note">
+                        Choose a video from your device. It stays in your browser and is not uploaded.
+                      </p>
+                      <label className="button button--secondary local-player__select">
+                        {localVideo ? 'Choose a different file' : 'Choose a video file'}
+                        <input
+                          className="sr-only"
+                          type="file"
+                          accept="video/*"
+                          onChange={handleLocalVideoChange}
+                        />
+                      </label>
+                      {localVideoError ? (
+                        <p className="local-player__error" role="alert">
+                          {localVideoError}
+                        </p>
+                      ) : null}
+                      {localVideo ? (
+                        <>
+                          <p className="local-player__filename">{localVideo.file.name}</p>
+                          <video
+                            className="local-player__video"
+                            src={localVideo.url}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            aria-label={`Play ${localVideo.file.name}`}
+                            onError={() => setLocalVideoError('This video could not be played by your browser.')}
+                          >
+                            Your browser does not support video playback.
+                          </video>
+                        </>
+                      ) : null}
+                    </section>
                     <div className="watch">
                       {providersLoading ? (
                         <p className="watch__status" role="status">
